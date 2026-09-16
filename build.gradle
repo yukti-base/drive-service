@@ -1,0 +1,63 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '4.1.0'
+    id 'io.spring.dependency-management' version '1.1.7'
+}
+
+group = 'org.yuktisetu'
+version = '0.0.1-SNAPSHOT'
+description = 'drive-service'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+repositories {
+    mavenCentral()
+    // The org.yuktisetu:* jars exist only in ~/.m2 after `./gradlew
+    // publishToMavenLocal` is run from framework/. Re-run it after ANY change to
+    // a framework module, or this service compiles against a stale copy.
+    mavenLocal()
+}
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-starter-security'
+    implementation 'org.springframework.boot:spring-boot-starter-webmvc'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+    implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+
+    // drive-dal brings user-dal and institute-dal transitively (both are `api`),
+    // but they are named explicitly because this service reads all three
+    // directly: drive tables for the posting, user-dal for student academics,
+    // institute-dal for college/department scoping.
+    implementation 'org.yuktisetu:drive-dal:1.0.0-SNAPSHOT'
+    implementation 'org.yuktisetu:user-dal:1.0.0-SNAPSHOT'
+    implementation 'org.yuktisetu:institute-dal:1.0.0-SNAPSHOT'
+    implementation 'org.yuktisetu:messaging-dal:1.0.0-SNAPSHOT'
+    implementation 'org.yuktisetu:core:1.0.0-SNAPSHOT'
+
+    implementation 'org.springframework.kafka:spring-kafka'
+
+    implementation 'io.jsonwebtoken:jjwt-api:0.12.6'
+    runtimeOnly 'io.jsonwebtoken:jjwt-impl:0.12.6'
+    runtimeOnly 'io.jsonwebtoken:jjwt-jackson:0.12.6'
+
+    compileOnly 'org.projectlombok:lombok'
+    runtimeOnly 'org.postgresql:postgresql'
+    annotationProcessor 'org.projectlombok:lombok'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-data-jpa-test'
+    testImplementation 'org.springframework.boot:spring-boot-starter-security-test'
+    testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
+    testCompileOnly 'org.projectlombok:lombok'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    testAnnotationProcessor 'org.projectlombok:lombok'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}
