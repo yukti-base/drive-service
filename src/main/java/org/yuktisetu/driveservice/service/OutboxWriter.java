@@ -3,9 +3,9 @@ package org.yuktisetu.driveservice.service;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import org.yuktisetu.db.OutboxEvent;
-import org.yuktisetu.events.EventEnvelope;
-import org.yuktisetu.repository.OutboxEventRepository;
+import org.yuktisetu.messaging.db.OutboxEvent;
+import org.yuktisetu.messaging.events.EventEnvelope;
+import org.yuktisetu.messaging.repository.OutboxEventRepository;
 import tools.jackson.databind.ObjectMapper;
 
 import java.time.Instant;

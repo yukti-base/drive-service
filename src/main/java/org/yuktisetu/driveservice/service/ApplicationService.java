@@ -7,19 +7,21 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.yuktisetu.driveservice.dto.ApplicationResponse;
 import org.yuktisetu.driveservice.exception.DriveExceptions;
-import org.yuktisetu.db.ApplicationStatusHistory;
-import org.yuktisetu.db.JobApplication;
-import org.yuktisetu.db.JobPosting;
-import org.yuktisetu.model.ActorKind;
-import org.yuktisetu.model.ApplicationSource;
-import org.yuktisetu.model.ApplicationStatus;
-import org.yuktisetu.model.ApplicationStatusTransitions;
-import org.yuktisetu.model.PostingStatusTransitions;
-import org.yuktisetu.repository.ApplicationStatusHistoryRepository;
-import org.yuktisetu.repository.JobApplicationRepository;
-import org.yuktisetu.repository.JobPostingRepository;
-import org.yuktisetu.repository.PostingEligibleStudentRepository;
-import org.yuktisetu.repository.UserRepository;
+import org.yuktisetu.drive.db.ApplicationStatusHistory;
+import org.yuktisetu.drive.db.JobApplication;
+import org.yuktisetu.drive.db.JobPosting;
+import org.yuktisetu.drive.model.ActorKind;
+import org.yuktisetu.drive.model.ApplicationSource;
+import org.yuktisetu.drive.model.ApplicationStatus;
+import org.yuktisetu.drive.model.ApplicationStatusTransitions;
+import org.yuktisetu.drive.model.PostingStatusTransitions;
+import org.yuktisetu.drive.repository.ApplicationStatusHistoryRepository;
+import org.yuktisetu.drive.repository.JobApplicationRepository;
+import org.yuktisetu.drive.repository.JobPostingRepository;
+import org.yuktisetu.drive.repository.PostingEligibleStudentRepository;
+import org.yuktisetu.identity.repository.UserRepository;
+import org.yuktisetu.profile.model.StudentDocumentType;
+import org.yuktisetu.profile.repository.StudentDocumentRepository;
 import org.yuktisetu.core.exception.ApiException;
 
 import java.time.Instant;
@@ -43,6 +45,7 @@ public class ApplicationService {
     private final ApplicationStatusHistoryRepository historyRepository;
     private final PostingEligibleStudentRepository eligibleStudentRepository;
     private final UserRepository userRepository;
+    private final StudentDocumentRepository documentRepository;
     private final StudentEligibilityService eligibilityService;
 
     /**
@@ -140,6 +143,7 @@ public class ApplicationService {
             application.setAppliedAt(now);
             application.setWithdrawnAt(null);
             application.setUpdatedBy(studentUserId);
+            attachResume(application, studentUserId);
         } else {
             from = null;
             application = new JobApplication();
@@ -150,6 +154,7 @@ public class ApplicationService {
             application.setSource(ApplicationSource.EASY_APPLY);
             application.setCreatedBy(studentUserId);
             application.setUpdatedBy(studentUserId);
+            attachResume(application, studentUserId);
         }
 
         try {
@@ -273,5 +278,38 @@ public class ApplicationService {
                 a.getStudentUserId(), a.getStatus(), a.getSource(),
                 a.getAppliedAt(), a.getWithdrawnAt(), a.getSealedAt(),
                 p.getApplicationDeadline());
+    }
+
+    /**
+     * Records WHICH resume the student applied with.
+     *
+     * Deliberately a snapshot taken at apply time, not a live lookup. A student
+     * who uploads a new resume next week has not changed what a company already
+     * received, and an admin opening the applicant list months later must see the
+     * document that was actually submitted. The columns on JobApplication existed
+     * for this from the start; nothing populated them until now.
+     *
+     * Applying without a resume is allowed -- the TnP may still want the student
+     * in the pool -- so a missing resume leaves the columns null rather than
+     * refusing the application.
+     */
+    private void attachResume(JobApplication application, Long studentUserId) {
+        try {
+            documentRepository
+                    .findByStudent_IdAndDocTypeAndIsPrimaryTrueAndIsDeletedFalse(
+                            studentUserId, StudentDocumentType.RESUME)
+                    .ifPresentOrElse(doc -> {
+                        application.setResumeStorageKey(doc.getStorageKey());
+                        application.setResumeUrl(doc.getUrl());
+                        application.setResumeFileName(doc.getFileName());
+                        log.info("Resume attached to application: studentUserId={} key={}",
+                                studentUserId, doc.getStorageKey());
+                    }, () -> log.info("No primary resume on file for studentUserId={}; applying without one",
+                            studentUserId));
+        } catch (Exception e) {
+            // A storage-lookup failure must not cost the student their
+            // application, least of all at a deadline.
+            log.error("Could not attach resume for studentUserId={}: {}", studentUserId, e.getMessage(), e);
+        }
     }
 }

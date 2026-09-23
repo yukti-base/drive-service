@@ -35,12 +35,20 @@ dependencies {
     // directly: drive tables for the posting, user-dal for student academics,
     // institute-dal for college/department scoping.
     implementation 'org.yuktisetu:drive-dal:1.0.0-SNAPSHOT'
-    implementation 'org.yuktisetu:user-dal:1.0.0-SNAPSHOT'
+    implementation 'org.yuktisetu:identity-dal:1.0.0-SNAPSHOT'
+    implementation 'org.yuktisetu:profile-dal:1.0.0-SNAPSHOT'
     implementation 'org.yuktisetu:institute-dal:1.0.0-SNAPSHOT'
     implementation 'org.yuktisetu:messaging-dal:1.0.0-SNAPSHOT'
     implementation 'org.yuktisetu:core:1.0.0-SNAPSHOT'
 
-    implementation 'org.springframework.kafka:spring-kafka'
+    // spring-boot-starter-kafka, NOT a bare spring-kafka dependency. Boot 4 split
+    // spring-boot-autoconfigure into per-technology modules and KafkaAutoConfiguration
+    // moved out of it -- Boot 3.4's autoconfigure jar lists it, Boot 4.1's does not.
+    // With only the bare library there is no KafkaTemplate, no KafkaAdmin, and
+    // @KafkaListener is silently ignored: the beans are created, the conditions
+    // report "matched", and nothing ever connects to a broker. The starter brings
+    // spring-boot-kafka (the autoconfiguration) alongside the library.
+    implementation 'org.springframework.boot:spring-boot-starter-kafka'
 
     implementation 'io.jsonwebtoken:jjwt-api:0.12.6'
     runtimeOnly 'io.jsonwebtoken:jjwt-impl:0.12.6'

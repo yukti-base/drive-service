@@ -25,8 +25,12 @@ import org.springframework.security.config.annotation.method.configuration.Enabl
  * thread and the annotation would be a silent no-op.
  */
 @SpringBootApplication
-@EntityScan(basePackages = "org.yuktisetu.db")
-@EnableJpaRepositories(basePackages = "org.yuktisetu.repository")
+// Scoped to the contexts this service owns or reaches, instead of the old
+// blanket org.yuktisetu.db. The blanket scan mapped every entity on the
+// classpath, so one bad column broke startup in four services at once.
+// These lists shrink on their own as cross-context dependencies are cut.
+@EntityScan(basePackages = {"org.yuktisetu.drive.db", "org.yuktisetu.identity.db", "org.yuktisetu.institute.db", "org.yuktisetu.profile.db", "org.yuktisetu.messaging.db"})
+@EnableJpaRepositories(basePackages = {"org.yuktisetu.drive.repository", "org.yuktisetu.identity.repository", "org.yuktisetu.institute.repository", "org.yuktisetu.profile.repository", "org.yuktisetu.messaging.repository"})
 @ComponentScan(basePackages = {"org.yuktisetu.driveservice", "org.yuktisetu.core"})
 @EnableMethodSecurity
 @EnableScheduling

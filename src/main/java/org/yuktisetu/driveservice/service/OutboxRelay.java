@@ -6,9 +6,9 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
-import org.yuktisetu.db.OutboxEvent;
-import org.yuktisetu.model.OutboxStatus;
-import org.yuktisetu.repository.OutboxEventRepository;
+import org.yuktisetu.messaging.db.OutboxEvent;
+import org.yuktisetu.messaging.model.OutboxStatus;
+import org.yuktisetu.messaging.repository.OutboxEventRepository;
 
 import java.time.Instant;
 import java.util.List;

@@ -1,7 +1,7 @@
 package org.yuktisetu.driveservice.dto;
 
-import org.yuktisetu.model.ApplicationSource;
-import org.yuktisetu.model.ApplicationStatus;
+import org.yuktisetu.drive.model.ApplicationSource;
+import org.yuktisetu.drive.model.ApplicationStatus;
 
 import java.time.Instant;
 

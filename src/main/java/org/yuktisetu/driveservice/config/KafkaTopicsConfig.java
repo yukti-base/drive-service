@@ -5,7 +5,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.config.TopicBuilder;
-import org.yuktisetu.events.DriveTopics;
+import org.yuktisetu.messaging.events.DriveTopics;
 
 /**
  * Topics this service PRODUCES, declared explicitly so partition counts are a

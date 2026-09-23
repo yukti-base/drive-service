@@ -1,10 +1,10 @@
 package org.yuktisetu.driveservice.dto;
 
-import org.yuktisetu.model.ApplicationStatus;
-import org.yuktisetu.model.JobType;
-import org.yuktisetu.model.PostingStatus;
-import org.yuktisetu.model.StipendPeriod;
-import org.yuktisetu.model.WorkMode;
+import org.yuktisetu.drive.model.ApplicationStatus;
+import org.yuktisetu.drive.model.JobType;
+import org.yuktisetu.drive.model.PostingStatus;
+import org.yuktisetu.drive.model.StipendPeriod;
+import org.yuktisetu.drive.model.WorkMode;
 
 import java.math.BigDecimal;
 import java.time.Instant;
