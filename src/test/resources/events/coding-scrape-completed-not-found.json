@@ -1,0 +1,19 @@
+{
+    "eventId": "39539f0a-89c7-4a38-bff8-38e8994d2f12",
+    "payload": {
+        "error": "codechef: no user 'zz_no_such_user_yk_8841' (redirected to https://www.codechef.com/)",
+        "jobId": 9,
+        "handle": "zz_no_such_user_yk_8841",
+        "outcome": "HANDLE_NOT_FOUND",
+        "attempts": 1,
+        "platform": "CODECHEF",
+        "jobStatus": "FAILED",
+        "finishedAt": "2026-10-14T20:03:08.161769+00:00",
+        "snapshotId": null,
+        "studentUserId": 38
+    },
+    "version": "v1",
+    "eventType": "CodingScrapeCompleted",
+    "occurredAt": "2026-10-14T20:03:08.161769+00:00",
+    "actorUserId": null
+}

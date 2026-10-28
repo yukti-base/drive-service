@@ -1,0 +1,19 @@
+{
+    "eventId": "4833d04e-abef-409f-a0fb-19d0ad38ca6f",
+    "payload": {
+        "error": null,
+        "jobId": 8,
+        "handle": "hardikmahajan9",
+        "outcome": "OK",
+        "attempts": 1,
+        "platform": "CODECHEF",
+        "jobStatus": "DONE",
+        "finishedAt": "2026-10-14T20:03:06.354476+00:00",
+        "snapshotId": 5,
+        "studentUserId": 13
+    },
+    "version": "v1",
+    "eventType": "CodingScrapeCompleted",
+    "occurredAt": "2026-10-14T20:03:06.354476+00:00",
+    "actorUserId": null
+}

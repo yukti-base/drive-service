@@ -3,6 +3,7 @@ package org.yuktisetu.driveservice.dto;
 import org.yuktisetu.drive.model.ApplicationStatus;
 import org.yuktisetu.drive.model.JobType;
 import org.yuktisetu.drive.model.PostingStatus;
+import org.yuktisetu.drive.model.PackageBasis;
 import org.yuktisetu.drive.model.StipendPeriod;
 import org.yuktisetu.drive.model.WorkMode;
 
@@ -37,6 +38,9 @@ public record StudentDriveDetailResponse(
         Integer internshipDurationMonths,
         boolean ppoPossible,
         Integer bondMonths,
+        BigDecimal bondAmount,
+        /** What the CTC figures mean: CTC, BASE or STIPEND. */
+        PackageBasis packageBasis,
         Integer vacancyCount,
         List<String> mandatorySkills,
         List<String> preferredSkills,
@@ -50,5 +54,7 @@ public record StudentDriveDetailResponse(
         ApplicationStatus myApplicationStatus,
         Instant myAppliedAt,
         List<String> criteriaSummary,
-        Instant serverTime
+        Instant serverTime,
+        // Shortlisted before the drive was reopened; see StudentDriveSummaryResponse.
+        boolean underReReview
 ) {}

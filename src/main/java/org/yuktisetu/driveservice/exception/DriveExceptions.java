@@ -110,6 +110,29 @@ public final class DriveExceptions {
         }
     }
 
+    /** The drive is already READY (the engine has started) or was cancelled. */
+    public static class ReviewClosedException extends ConflictException {
+        public ReviewClosedException(org.yuktisetu.drive.model.ScoringGateState state) {
+            super("CODING_REVIEW_CLOSED", state == org.yuktisetu.drive.model.ScoringGateState.READY
+                    ? "Every flagged application on this drive has been decided and shortlisting has started. Decisions can no longer be changed."
+                    : "This drive was cancelled, so there is nothing left to review.");
+        }
+    }
+
+    /** A coding re-check that cannot happen: none is waiting, it was used, or the deadline passed. */
+    public static class RecheckUnavailableException extends ConflictException {
+        public RecheckUnavailableException(String detail) {
+            super("CODING_RECHECK_UNAVAILABLE", detail);
+        }
+    }
+
+    /** The scoring or shortlist step asked for is not available in the drive's current state. */
+    public static class ScoringStateException extends ConflictException {
+        public ScoringStateException(String code, String detail) {
+            super(code, detail);
+        }
+    }
+
     public static class InvalidRequestException extends ApiException {
         public InvalidRequestException(String message) {
             super(HttpStatus.BAD_REQUEST, "INVALID_REQUEST", message);

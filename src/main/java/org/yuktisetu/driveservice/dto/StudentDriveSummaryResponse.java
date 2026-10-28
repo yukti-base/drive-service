@@ -34,5 +34,8 @@ public record StudentDriveSummaryResponse(
         Instant driveDate,
         boolean applyOpen,
         ApplicationStatus myApplicationStatus,
-        Instant serverTime
+        Instant serverTime,
+        // Shortlisted before the drive was reopened, and waiting on the new
+        // shortlist. A display state derived from history, not a stored status.
+        boolean underReReview
 ) {}

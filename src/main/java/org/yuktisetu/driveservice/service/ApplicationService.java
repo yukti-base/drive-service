@@ -15,6 +15,7 @@ import org.yuktisetu.drive.model.ApplicationSource;
 import org.yuktisetu.drive.model.ApplicationStatus;
 import org.yuktisetu.drive.model.ApplicationStatusTransitions;
 import org.yuktisetu.drive.model.PostingStatusTransitions;
+import org.yuktisetu.drive.model.ShortlistingMode;
 import org.yuktisetu.drive.repository.ApplicationStatusHistoryRepository;
 import org.yuktisetu.drive.repository.JobApplicationRepository;
 import org.yuktisetu.drive.repository.JobPostingRepository;
@@ -47,11 +48,14 @@ public class ApplicationService {
     private final UserRepository userRepository;
     private final StudentDocumentRepository documentRepository;
     private final StudentEligibilityService eligibilityService;
+    private final DriveNotificationService driveNotificationService;
+    private final CodingCaptureService codingCaptureService;
 
     /**
      * Apply, in the order the checks have to happen.
      *
-     *  1. Read the posting under a SHARED lock. This is what stops the deadline
+     *  1. Read the posting under a SHARED lock -- or an EXCLUSIVE one on an FCFS
+     *     drive, see the lock choice below. This is what stops the deadline
      *     race: the sealing sweep takes an EXCLUSIVE lock on the same row, so this
      *     transaction either commits before sealing begins or blocks and then
      *     fails its own status check afterwards. Without it, an application landing
@@ -65,7 +69,9 @@ public class ApplicationService {
      *  4. Re-evaluate eligibility LIVE. The index row may be days old; in between
      *     the student's CGPA could have changed, an offer could have landed, or the
      *     TnP could have edited the criteria.
-     *  5. Respect the posting's application cap.
+     *  5. Respect the seat cap ONLY on a first-come-first-served drive. On a
+     *     recruitment drive the seat count is a shortlist target applied after the
+     *     deadline, so capping here would silently turn the drive into a race.
      *  6. Insert, or revive a withdrawn row. The unique constraint is the last
      *     line of defence against a double tap.
      */
@@ -93,7 +99,17 @@ public class ApplicationService {
     }
 
     private ApplicationResponse doApply(Long postingId, Long studentUserId) {
-        JobPosting posting = postingRepository.findForApply(postingId)
+        // Which lock to take has to be decided BEFORE the first locking read.
+        // Taking the shared lock and upgrading it later would deadlock two
+        // concurrent applies, each holding a share lock the other needs released.
+        // So: one unlocked mode lookup, then the right lock, acquired once.
+        ShortlistingMode mode = postingRepository.findShortlistingMode(postingId)
+                .orElseThrow(() -> new DriveExceptions.DriveNotVisibleException(postingId));
+        boolean capsAtApplyTime = mode.capsApplicationsAtApplyTime();
+
+        JobPosting posting = (capsAtApplyTime
+                ? postingRepository.findForSealing(postingId)   // exclusive: seats are a race
+                : postingRepository.findForApply(postingId))    // shared: applies run in parallel
                 .orElseThrow(() -> new DriveExceptions.DriveNotVisibleException(postingId));
 
         assertWindowOpen(posting);
@@ -110,10 +126,21 @@ public class ApplicationService {
             throw new DriveExceptions.EligibilityChangedException(failures);
         }
 
-        if (posting.getMaxApplications() != null) {
+        // Seat cap, on FCFS drives only.
+        //
+        // Correct here precisely BECAUSE this branch holds the exclusive lock: the
+        // count and the insert below are serialised per posting, so the cap cannot
+        // be overshot. The same code under the shared lock would be a check-then-act
+        // race where every concurrent applicant reads cap-1 and every one inserts.
+        //
+        // Not run at all on a recruitment drive: there, maxApplications is the
+        // shortlist target and the shortlisting engine applies it after the seal.
+        if (capsAtApplyTime && posting.getMaxApplications() != null) {
             long current = applicationRepository.countByPosting_IdAndIsDeletedFalseAndStatusNot(
                     postingId, ApplicationStatus.WITHDRAWN);
             if (current >= posting.getMaxApplications()) {
+                log.info("Apply refused, FCFS seats full: postingId={} studentUserId={} cap={}",
+                        postingId, studentUserId, posting.getMaxApplications());
                 throw new DriveExceptions.ApplicationLimitReachedException(posting.getMaxApplications());
             }
         }
@@ -170,6 +197,16 @@ public class ApplicationService {
         recordHistory(application, from, ApplicationStatus.APPLIED, studentUserId,
                 ActorKind.STUDENT, "Easy Apply");
 
+        // The student's coding data, captured as of this moment. Same transaction
+        // as the application: queueing it is two or three small inserts and never
+        // touches a coding platform, so it adds milliseconds, not a scrape.
+        codingCaptureService.captureForApplication(application, posting, now);
+
+        // Queued inside the apply transaction, so the receipt and the application
+        // are the same fact. An application that commits without its receipt is
+        // the case a student later disputes and nobody can settle.
+        driveNotificationService.queueApplicationSubmitted(postingId, studentUserId);
+
         log.info("Application submitted: applicationId={} postingId={} studentUserId={}",
                 application.getId(), postingId, studentUserId);
         return toResponse(application);
@@ -215,6 +252,8 @@ public class ApplicationService {
 
         recordHistory(application, ApplicationStatus.APPLIED, ApplicationStatus.WITHDRAWN,
                 studentUserId, ActorKind.STUDENT, "Withdrawn by student");
+
+        driveNotificationService.queueApplicationWithdrawn(postingId, studentUserId);
 
         log.info("Application withdrawn: applicationId={} postingId={} studentUserId={}",
                 application.getId(), postingId, studentUserId);

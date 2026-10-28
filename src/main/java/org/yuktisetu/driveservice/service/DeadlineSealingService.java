@@ -21,7 +21,9 @@ import java.util.List;
 
 /**
  * Sealing the applicant pool at the deadline -- the handover point to the
- * shortlisting engine, which is not built yet.
+ * shortlisting engine, which is not built yet. For a COMPOSITE_SCORE drive the
+ * engine's actual trigger is DriveReadyForScoring, written by ScoringGateService
+ * once every applicant's coding capture has settled.
  *
  * Deliberately split from the scheduler that calls it, so each posting is sealed
  * in its OWN transaction (REQUIRES_NEW). One malformed drive must not roll back
@@ -36,6 +38,8 @@ public class DeadlineSealingService {
     private final JobApplicationRepository applicationRepository;
     private final PostingEligibleStudentRepository eligibleStudentRepository;
     private final OutboxWriter outboxWriter;
+    private final DriveNotificationService driveNotificationService;
+    private final ScoringGateService scoringGateService;
 
     /** Ids of postings whose deadline has passed while still PUBLISHED. */
     @Transactional(readOnly = true)
@@ -110,6 +114,13 @@ public class DeadlineSealingService {
         int sealed = applicationRepository.sealPool(
                 postingId, ApplicationStatus.APPLIED, ApplicationStatus.IN_REVIEW, now);
 
+        // sealPool clears the persistence context, which DETACHES this posting.
+        // Everything below reads posting.getCompany() for a notice, and a
+        // detached proxy throws "no session" there -- swallowed by the notifiers,
+        // so the pool-sealed and coding-review notices were silently lost. The
+        // row is still locked by this transaction; this re-read is a plain load.
+        posting = postingRepository.findById(postingId).orElseThrow();
+
         long eligibleCount = eligibleStudentRepository.countByPosting_IdAndIsDeletedFalse(postingId);
 
         outboxWriter.write(
@@ -122,6 +133,16 @@ public class DeadlineSealingService {
                 new ApplicantPoolSealedEvent(
                         postingId, now, sealed, (int) eligibleCount,
                         posting.getShortlistingMode().name()));
+
+        // The staff notice rides the same transaction as the seal. It is the one
+        // message that tells a coordinator the drive has moved into their hands,
+        // and a seal whose notice was lost is a pool nobody knows is waiting.
+        driveNotificationService.queueApplicantPoolSealed(postingId, sealed);
+
+        // Open the scoring gate in the same transaction, and settle it at once.
+        // A pool whose captures all finished before the deadline is READY right
+        // here; otherwise the last scrape to finish, or the TnP, will move it on.
+        scoringGateService.openAndSettle(posting, now);
 
         log.info("Applicant pool sealed: postingId={} applicants={} eligible={} mode={}",
                 postingId, sealed, eligibleCount, posting.getShortlistingMode());

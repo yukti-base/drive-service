@@ -98,9 +98,17 @@ public class StudentDriveService {
                 myStatuses.put(((Number) row[0]).longValue(), (ApplicationStatus) row[1]);
             }
 
+            // Query 3: drives this student is "under re-review" on (reopened after
+            // they were shortlisted). Only reopened drives can match.
+            java.util.Set<Long> reReview = new java.util.HashSet<>();
+            List<Long> reopened = postings.stream().filter(p -> p.getReopenedAt() != null).map(JobPosting::getId).toList();
+            if (!reopened.isEmpty()) {
+                reReview.addAll(applicationRepository.findUnderReReview(studentUserId, reopened));
+            }
+
             List<StudentDriveSummaryResponse> out = new ArrayList<>(postings.size());
             for (JobPosting p : postings) {
-                out.add(toSummary(p, myStatuses.get(p.getId()), now));
+                out.add(toSummary(p, myStatuses.get(p.getId()), now, reReview.contains(p.getId())));
             }
             return out;
 
@@ -150,7 +158,8 @@ public class StudentDriveService {
                     posting.getCtcMin(), posting.getCtcMax(), posting.getCtcCurrency(),
                     posting.getStipendAmount(), posting.getStipendPeriod(),
                     posting.getInternshipDurationMonths(), posting.isPpoPossible(),
-                    posting.getBondMonths(), posting.getVacancyCount(),
+                    posting.getBondMonths(), posting.getBondAmount(), posting.getPackageBasis(),
+                    posting.getVacancyCount(),
                     mandatory, preferred, locations,
                     posting.getStatus(), posting.getApplicationOpensAt(), posting.getApplicationDeadline(),
                     posting.getDriveDate(), posting.getDriveVenue(),
@@ -158,7 +167,9 @@ public class StudentDriveService {
                     mine.map(JobApplication::getStatus).orElse(null),
                     mine.map(JobApplication::getAppliedAt).orElse(null),
                     criteriaSummary(postingId),
-                    now);
+                    now,
+                    posting.getReopenedAt() != null && mine.isPresent()
+                            && !applicationRepository.findUnderReReview(studentUserId, List.of(postingId)).isEmpty());
 
         } catch (ApiException e) {
             throw e;
@@ -225,14 +236,15 @@ public class StudentDriveService {
         };
     }
 
-    private StudentDriveSummaryResponse toSummary(JobPosting p, ApplicationStatus myStatus, Instant now) {
+    private StudentDriveSummaryResponse toSummary(JobPosting p, ApplicationStatus myStatus, Instant now,
+                                                  boolean underReReview) {
         Company c = p.getCompany();
         return new StudentDriveSummaryResponse(
                 p.getId(), c.getName(), c.getLogoUrl(), p.getTitle(),
                 p.getJobType(), p.getWorkMode(),
                 p.getCtcMin(), p.getCtcMax(), p.getCtcCurrency(), p.getStipendAmount(),
                 p.getStatus(), p.getApplicationDeadline(), p.getDriveDate(),
-                isApplyOpen(p, now), myStatus, now);
+                isApplyOpen(p, now), myStatus, now, underReReview);
     }
 
     /**
