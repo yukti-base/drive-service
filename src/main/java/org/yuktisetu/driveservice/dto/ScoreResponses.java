@@ -59,6 +59,21 @@ public final class ScoreResponses {
             List<String> floorsFailed,
             Map<String, Object> breakdown) {}
 
+    public record ResolveEmailsRequest(@NotNull @jakarta.validation.constraints.Size(max = 1_000_000) String text) {}
+
+    /** What a pasted or uploaded list resolved to against the sealed pool. Nothing is changed by resolving. */
+    public record EmailResolution(
+            int listed,
+            List<Match> matched,
+            List<String> noAccount,
+            List<String> notApplied,
+            List<NotInPool> notInPool,
+            Map<String, Integer> duplicates,
+            List<String> unreadable) {
+        public record Match(Long applicationId, String email, String name) {}
+        public record NotInPool(String email, String name, String status) {}
+    }
+
     public record PublishShortlistRequest(
             /** Applications the TnP selected. Direct picks from the coding review are added automatically. */
             @NotNull List<Long> applicationIds) {}

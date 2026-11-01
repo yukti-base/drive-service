@@ -18,6 +18,8 @@ import org.yuktisetu.drive.model.ApplicationStatus;
 import org.yuktisetu.drive.model.CodingReviewDecision;
 import org.yuktisetu.drive.model.ScoreRunStatus;
 import org.yuktisetu.drive.model.ShortlistingMode;
+import org.yuktisetu.drive.model.EmailList;
+import org.yuktisetu.drive.model.PostingStatus;
 import org.yuktisetu.drive.repository.ApplicationCodingReviewRepository;
 import org.yuktisetu.drive.repository.ApplicationScoreRepository;
 import org.yuktisetu.drive.repository.DriveScoreRunRepository;
@@ -26,6 +28,7 @@ import org.yuktisetu.drive.repository.JobApplicationRepository;
 import org.yuktisetu.drive.repository.JobPostingRepository;
 import org.yuktisetu.drive.repository.PlatformSettingsRepository;
 import org.yuktisetu.drive.repository.PostingTargetRepository;
+import org.yuktisetu.driveservice.dto.ScoreResponses.EmailResolution;
 import org.yuktisetu.driveservice.dto.ScoreResponses.HeldStudent;
 import org.yuktisetu.driveservice.dto.ScoreResponses.StaffDriveScores;
 import org.yuktisetu.driveservice.dto.ScoreResponses.StaffScoreItem;
@@ -103,7 +106,7 @@ public class ShortlistService {
                 SELECT a.id, a.student_user_id, a.status
                   FROM job_applications a
                  WHERE a.posting_id = :postingId
-                   AND a.status IN ('IN_REVIEW','SHORTLISTED','REJECTED')
+                   AND a.status IN ('IN_REVIEW','SHORTLISTED','REJECTED','OFFERED')
                    AND a.is_deleted = false
                  ORDER BY a.id
                 """, new MapSqlParameterSource("postingId", postingId),
@@ -158,9 +161,12 @@ public class ShortlistService {
         }
 
         String runStatus = run == null ? "NOT_SCORED" : run.getStatus().name();
+        boolean composite = posting.getShortlistingMode() == ShortlistingMode.COMPOSITE_SCORE;
         boolean canPublish = posting.getShortlistPublishedAt() == null
-                && run != null
-                && (run.getStatus() == ScoreRunStatus.SCORED || run.getStatus() == ScoreRunStatus.DECLINED)
+                && posting.getStatus() == PostingStatus.APPLICATIONS_CLOSED
+                && (!composite || (run != null
+                    && (run.getStatus() == ScoreRunStatus.SCORED || run.getStatus() == ScoreRunStatus.DECLINED)))
+                && posting.getShortlistingMode() != ShortlistingMode.FCFS
                 && coversEveryTarget(actor, postingId);
 
         return new StaffDriveScores(
@@ -212,12 +218,21 @@ public class ShortlistService {
             throw new DriveExceptions.ScoringStateException("SHORTLIST_PUBLISHED",
                     "The shortlist for this drive was already published.");
         }
-        if (posting.getShortlistingMode() != ShortlistingMode.COMPOSITE_SCORE) {
-            throw new DriveExceptions.ScoringStateException("NOT_COMPOSITE_SCORE",
-                    "This drive does not use composite-score shortlisting.");
+        if (posting.getStatus() != PostingStatus.APPLICATIONS_CLOSED) {
+            throw new DriveExceptions.ScoringStateException("NOT_SEALED",
+                    "A shortlist can be published once applications have closed.");
         }
+        // FCFS has no shortlist: the seat holders are shortlisted when the pool seals.
+        if (posting.getShortlistingMode() == ShortlistingMode.FCFS) {
+            throw new DriveExceptions.ScoringStateException("FCFS_NO_SHORTLIST",
+                    "First-come-first-served drives shortlist every seat holder automatically.");
+        }
+        // MANUAL and COMPANY_SIDE (decided 2026-10-30): the TnP picks the list --
+        // ticked here, or uploaded / pasted as the company's emails -- with no
+        // scoring run. COMPOSITE_SCORE still needs its run.
+        boolean composite = posting.getShortlistingMode() == ShortlistingMode.COMPOSITE_SCORE;
         DriveScoreRun run = runRepository.findByPostingIdAndSupersededAtIsNull(postingId).orElse(null);
-        if (run == null || run.getStatus() == ScoreRunStatus.HELD_FOR_REVIEW) {
+        if (composite && (run == null || run.getStatus() == ScoreRunStatus.HELD_FOR_REVIEW)) {
             throw new DriveExceptions.ScoringStateException("NOT_SCORED", run == null
                     ? "This drive has not been scored yet."
                     : "Scoring is waiting for your approval of the held students.");
@@ -271,16 +286,66 @@ public class ShortlistService {
         posting.setShortlistPublishedBy(actor.userId());
         postingRepository.save(posting);
 
-        boolean scoresVisible = settingsRepository.current().isShowScoresToStudents()
+        boolean scoresVisible = composite && run != null
+                && settingsRepository.current().isShowScoresToStudents()
                 && run.getStatus() == ScoreRunStatus.SCORED;
         notificationService.queueShortlistResult(postingId,
                 shortlisted.stream().map(pool::get).toList(),
                 rejected.stream().map(pool::get).toList(),
                 scoresVisible);
 
-        log.info("Shortlist published: postingId={} actorId={} shortlisted={} rejected={} run={}",
-                postingId, actor.userId(), shortlisted.size(), rejected.size(), run.getStatus());
+        log.info("Shortlist published: postingId={} actorId={} mode={} shortlisted={} rejected={} run={}",
+                postingId, actor.userId(), posting.getShortlistingMode(), shortlisted.size(), rejected.size(),
+                run == null ? null : run.getStatus());
         return read(actor, posting);
+    }
+
+    /**
+     * Resolves the company's list -- pasted, or an uploaded sheet the portal
+     * turned into text -- against the sealed pool. Changes nothing: the portal
+     * ticks the matched students and the TnP publishes as usual, so what is
+     * published is always what they saw.
+     */
+    @Transactional(readOnly = true)
+    public EmailResolution resolveEmails(UserPrincipal actor, Long postingId, String text) {
+        authorised(actor, postingId, false);
+        EmailList.Parsed parsed;
+        try {
+            parsed = EmailList.parse(text);
+        } catch (IllegalArgumentException e) {
+            throw new DriveExceptions.InvalidRequestException(e.getMessage());
+        }
+        List<EmailResolution.Match> matched = new ArrayList<>();
+        List<String> noAccount = new ArrayList<>();
+        List<String> notApplied = new ArrayList<>();
+        List<EmailResolution.NotInPool> notInPool = new ArrayList<>();
+        if (!parsed.emails().isEmpty()) {
+            Map<String, Object[]> byEmail = new HashMap<>();
+            for (Object[] row : applicationRepository.resolveEmails(postingId, parsed.emails())) {
+                byEmail.put((String) row[0], row);
+            }
+            Map<Long, String[]> who = people(byEmail.values().stream().map(r -> ((Number) r[1]).longValue()).toList());
+            for (String email : parsed.emails()) {
+                Object[] row = byEmail.get(email);
+                if (row == null) {
+                    noAccount.add(email);
+                    continue;
+                }
+                String name = who.getOrDefault(((Number) row[1]).longValue(), new String[]{"", ""})[0];
+                if (row[2] == null) {
+                    notApplied.add(email);
+                } else if (!"IN_REVIEW".equals(row[3])) {
+                    notInPool.add(new EmailResolution.NotInPool(email, name, (String) row[3]));
+                } else {
+                    matched.add(new EmailResolution.Match(((Number) row[2]).longValue(), email, name));
+                }
+            }
+        }
+        log.info("Shortlist email list resolved: postingId={} actorId={} listed={} matched={} noAccount={} "
+                        + "notApplied={} notInPool={}", postingId, actor.userId(), parsed.emails().size(),
+                matched.size(), noAccount.size(), notApplied.size(), notInPool.size());
+        return new EmailResolution(parsed.emails().size(), matched, noAccount, notApplied, notInPool,
+                parsed.duplicates(), parsed.unreadable());
     }
 
     /**

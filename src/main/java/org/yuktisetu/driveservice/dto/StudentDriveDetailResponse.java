@@ -56,5 +56,26 @@ public record StudentDriveDetailResponse(
         List<String> criteriaSummary,
         Instant serverTime,
         // Shortlisted before the drive was reopened; see StudentDriveSummaryResponse.
-        boolean underReReview
-) {}
+        boolean underReReview,
+        /**
+         * The drive's rounds as THIS student sees them: empty unless they were
+         * shortlisted. While they are in the drive, every round (with the
+         * upcoming ones' date and venue); once out, the rounds up to the one they
+         * went out in. Their own published result only -- never a draft mark,
+         * never anyone else's.
+         */
+        List<MyRound> rounds
+) {
+    public record MyRound(
+            int seq,
+            String name,
+            String roundType,
+            Instant scheduledAt,
+            String venue,
+            String instructions,
+            boolean published,
+            boolean current,
+            /** ADVANCED / NOT_ADVANCED / ABSENT, once this round is published for them; else null. */
+            String myOutcome,
+            String myOutcomeLabel) {}
+}

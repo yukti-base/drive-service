@@ -2,13 +2,17 @@ package org.yuktisetu.driveservice.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.yuktisetu.drive.db.JobPosting;
 import org.yuktisetu.messaging.events.ApplicantPoolSealedEvent;
 import org.yuktisetu.messaging.events.DriveTopics;
+import org.yuktisetu.drive.model.ActorKind;
 import org.yuktisetu.drive.model.ApplicationStatus;
+import org.yuktisetu.drive.model.ShortlistingMode;
 import org.yuktisetu.drive.model.PostingStatus;
 import org.yuktisetu.drive.model.PostingStatusTransitions;
 import org.yuktisetu.drive.repository.JobApplicationRepository;
@@ -40,6 +44,7 @@ public class DeadlineSealingService {
     private final OutboxWriter outboxWriter;
     private final DriveNotificationService driveNotificationService;
     private final ScoringGateService scoringGateService;
+    private final NamedParameterJdbcTemplate jdbc;
 
     /** Ids of postings whose deadline has passed while still PUBLISHED. */
     @Transactional(readOnly = true)
@@ -139,6 +144,14 @@ public class DeadlineSealingService {
         // and a seal whose notice was lost is a pool nobody knows is waiting.
         driveNotificationService.queueApplicantPoolSealed(postingId, sealed);
 
+        // FCFS: the seats are the allocation, so there is no shortlisting step --
+        // every seat holder is shortlisted as the pool seals, and the drive's
+        // rounds can start (decided 2026-10-03; wired 2026-10-30).
+        if (posting.getShortlistingMode() == ShortlistingMode.FCFS && sealed > 0) {
+            shortlistSeatHolders(posting, now);
+            posting = postingRepository.findById(postingId).orElseThrow();
+        }
+
         // Open the scoring gate in the same transaction, and settle it at once.
         // A pool whose captures all finished before the deadline is READY right
         // here; otherwise the last scrape to finish, or the TnP, will move it on.
@@ -147,5 +160,25 @@ public class DeadlineSealingService {
         log.info("Applicant pool sealed: postingId={} applicants={} eligible={} mode={}",
                 postingId, sealed, eligibleCount, posting.getShortlistingMode());
         return true;
+    }
+
+    private void shortlistSeatHolders(JobPosting posting, Instant now) {
+        Long postingId = posting.getId();
+        List<Long> ids = applicationRepository.findIdsByPostingAndStatus(postingId, ApplicationStatus.IN_REVIEW);
+        if (ids.isEmpty()) {
+            return;
+        }
+        List<Long> students = jdbc.queryForList(
+                "SELECT student_user_id FROM job_applications WHERE id IN (:ids)",
+                new MapSqlParameterSource("ids", ids), Long.class);
+        applicationRepository.recordHistoryForIds(ids, ApplicationStatus.IN_REVIEW.name(),
+                ApplicationStatus.SHORTLISTED.name(), now, null, ActorKind.SYSTEM.name(),
+                "First come, first served: every seat holder is shortlisted");
+        applicationRepository.updateStatusForIds(ids, ApplicationStatus.IN_REVIEW, ApplicationStatus.SHORTLISTED, null);
+        JobPosting fresh = postingRepository.findById(postingId).orElseThrow();
+        fresh.setShortlistPublishedAt(now);
+        postingRepository.save(fresh);
+        driveNotificationService.queueShortlistResult(postingId, students, List.of(), false);
+        log.info("FCFS seat holders shortlisted at seal: postingId={} shortlisted={}", postingId, ids.size());
     }
 }

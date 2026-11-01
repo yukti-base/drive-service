@@ -16,6 +16,7 @@ import org.yuktisetu.drive.repository.DriveScoreRunRepository;
 import org.yuktisetu.drive.repository.DriveScoringGateRepository;
 import org.yuktisetu.drive.repository.JobApplicationRepository;
 import org.yuktisetu.drive.repository.JobPostingRepository;
+import org.yuktisetu.drive.repository.RoundResultRepository;
 import org.yuktisetu.driveservice.dto.ReopenDriveRequest;
 import org.yuktisetu.driveservice.exception.DriveExceptions;
 
@@ -61,6 +62,7 @@ public class DriveReopenService {
     private final JobApplicationRepository applicationRepository;
     private final DriveScoringGateRepository gateRepository;
     private final DriveScoreRunRepository runRepository;
+    private final RoundResultRepository roundResultRepository;
     private final ShortlistService shortlistService;
     private final DriveNotificationService notificationService;
     private final NamedParameterJdbcTemplate jdbc;
@@ -95,6 +97,15 @@ public class DriveReopenService {
         if (offers > 0) {
             throw new DriveExceptions.ScoringStateException("OFFERS_MADE",
                     "Offers have been made on this drive, so it cannot be reopened.");
+        }
+
+        // Decided 2026-10-30: once anyone has been marked in a round -- even a
+        // draft -- the drive is under way on campus and is not reopened. Read
+        // under the posting lock, which every round path takes first, so a mark
+        // cannot land between this check and the reopen.
+        if (roundResultRepository.existsByPostingId(postingId)) {
+            throw new DriveExceptions.ScoringStateException("ROUNDS_STARTED",
+                    "Rounds have started on this drive, so it cannot be reopened.");
         }
 
         // 1. The gate. Locked before it is removed, the same order every gate path uses.

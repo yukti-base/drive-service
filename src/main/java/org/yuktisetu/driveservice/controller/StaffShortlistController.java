@@ -13,7 +13,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.yuktisetu.core.response.YuktiSetuResponse;
 import org.yuktisetu.core.security.UserPrincipal;
+import org.yuktisetu.driveservice.dto.ScoreResponses.EmailResolution;
 import org.yuktisetu.driveservice.dto.ScoreResponses.PublishShortlistRequest;
+import org.yuktisetu.driveservice.dto.ScoreResponses.ResolveEmailsRequest;
 import org.yuktisetu.driveservice.dto.ScoreResponses.StaffDriveScores;
 import org.yuktisetu.driveservice.service.ShortlistService;
 
@@ -51,6 +53,17 @@ public class StaffShortlistController {
             @PathVariable Long postingId) {
         return ResponseEntity.ok(YuktiSetuResponse.success(
                 shortlistService.approveHeld(actor, postingId), "Scoring approved"));
+    }
+
+    /** Resolve the company's list of emails against the sealed pool (MANUAL / COMPANY_SIDE drives). */
+    @PostMapping("/resolve-emails")
+    @PreAuthorize(REVIEWERS)
+    public ResponseEntity<YuktiSetuResponse<EmailResolution>> resolveEmails(
+            @AuthenticationPrincipal UserPrincipal actor,
+            @PathVariable Long postingId,
+            @RequestBody @Valid ResolveEmailsRequest request) {
+        return ResponseEntity.ok(YuktiSetuResponse.success(
+                shortlistService.resolveEmails(actor, postingId, request.text())));
     }
 
     @PostMapping("/publish")

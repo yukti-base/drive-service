@@ -8,6 +8,12 @@ import org.springframework.transaction.annotation.Transactional;
 import org.yuktisetu.core.cache.CacheNames;
 import org.yuktisetu.core.exception.ApiException;
 import org.yuktisetu.driveservice.dto.MyEligibilityResponse;
+import org.yuktisetu.drive.db.DriveRound;
+import org.yuktisetu.drive.db.RoundResult;
+import org.yuktisetu.drive.model.ApplicationStatus;
+import org.yuktisetu.drive.model.RoundStatus;
+import org.yuktisetu.drive.repository.DriveRoundRepository;
+import org.yuktisetu.drive.repository.RoundResultRepository;
 import org.yuktisetu.driveservice.dto.StudentDriveDetailResponse;
 import org.yuktisetu.driveservice.dto.StudentDriveSummaryResponse;
 import org.yuktisetu.driveservice.exception.DriveExceptions;
@@ -63,6 +69,8 @@ public class StudentDriveService {
     private final PostingLocationRepository locationRepository;
     private final PostingEligibilityCriteriaRepository criteriaRepository;
     private final StudentEligibilityService eligibilityService;
+    private final DriveRoundRepository roundRepository;
+    private final RoundResultRepository roundResultRepository;
 
     /**
      * The student's drive list. Two queries, always.
@@ -169,7 +177,8 @@ public class StudentDriveService {
                     criteriaSummary(postingId),
                     now,
                     posting.getReopenedAt() != null && mine.isPresent()
-                            && !applicationRepository.findUnderReReview(studentUserId, List.of(postingId)).isEmpty());
+                            && !applicationRepository.findUnderReReview(studentUserId, List.of(postingId)).isEmpty(),
+                    myRounds(postingId, studentUserId, mine.map(JobApplication::getStatus).orElse(null)));
 
         } catch (ApiException e) {
             throw e;
@@ -178,6 +187,43 @@ public class StudentDriveService {
             throw new DriveExceptions.InvalidRequestException(
                     "Could not load this drive right now. Please try again.");
         }
+    }
+
+    /** See StudentDriveDetailResponse.rounds. Two queries, whatever the number of rounds. */
+    private List<StudentDriveDetailResponse.MyRound> myRounds(Long postingId, Long studentUserId,
+                                                              ApplicationStatus status) {
+        if (status == null) {
+            return List.of();
+        }
+        Map<Long, RoundResult> mine = new HashMap<>();
+        roundResultRepository.findPublishedForStudent(studentUserId, List.of(postingId))
+                .forEach(r -> mine.put(r.getRoundId(), r));
+        boolean inDrive = status == ApplicationStatus.SHORTLISTED || status == ApplicationStatus.OFFERED
+                || status == ApplicationStatus.OFFER_ACCEPTED || status == ApplicationStatus.OFFER_DECLINED;
+        if (!inDrive && mine.isEmpty()) {
+            return List.of();
+        }
+        List<StudentDriveDetailResponse.MyRound> out = new ArrayList<>();
+        boolean currentSeen = false;
+        for (DriveRound r : roundRepository.findByPostingIdOrderBySeqAsc(postingId)) {
+            RoundResult result = mine.get(r.getId());
+            boolean published = r.getStatus() == RoundStatus.PUBLISHED;
+            boolean current = !published && !currentSeen && status == ApplicationStatus.SHORTLISTED;
+            if (!published) {
+                currentSeen = true;
+            }
+            out.add(new StudentDriveDetailResponse.MyRound(r.getSeq(), r.getName(), r.getRoundType().label(),
+                    r.getScheduledAt(), r.getVenue(), r.getInstructions(), published && result != null, current,
+                    result == null ? null : result.getOutcome().name(),
+                    result == null ? null : result.getOutcome().label()));
+            if (result != null && !result.getOutcome().advances()) {
+                break;   // out of the drive here; later rounds are not theirs
+            }
+            if (!inDrive && result == null) {
+                break;
+            }
+        }
+        return out;
     }
 
     /**
