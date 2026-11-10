@@ -133,6 +133,13 @@ public final class DriveExceptions {
         }
     }
 
+    /** An offer action the offer's current state does not allow; the code says which. */
+    public static class OfferStateException extends ConflictException {
+        public OfferStateException(String code, String detail) {
+            super(code, detail);
+        }
+    }
+
     public static class InvalidRequestException extends ApiException {
         public InvalidRequestException(String message) {
             super(HttpStatus.BAD_REQUEST, "INVALID_REQUEST", message);

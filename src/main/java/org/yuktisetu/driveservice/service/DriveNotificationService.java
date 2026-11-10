@@ -422,6 +422,41 @@ public class DriveNotificationService {
                 .collect(Collectors.joining("; "));
     }
 
+    /**
+     * In-app, to the drive's placement staff: a student asked to give up an
+     * accepted offer, and it waits on them (decided 2026-11-01).
+     */
+    public void queueOfferWithdrawalRequested(Long postingId, Long studentUserId, String reason) {
+        try {
+            PostingNotice posting = noticeOf(postingId);
+            List<NotificationDispatchEvent.Recipient> recipients = staffRecipients(postingId);
+            if (recipients.isEmpty()) {
+                log.warn("Withdrawal requested on postingId={} but there is no staff audience to tell", postingId);
+                return;
+            }
+            String studentName = userRepository.findNotifyTarget(studentUserId)
+                    .map(NotifyTarget::displayName).orElse("A student");
+            outboxWriter.write(
+                    DriveTopics.NOTIFICATION_DISPATCH,
+                    "NotificationDispatch",
+                    "JobPosting",
+                    posting.id(),
+                    String.valueOf(posting.id()),
+                    null,
+                    Dispatches.offerWithdrawalRequested(
+                            posting.companyName(),
+                            posting.title(),
+                            studentName,
+                            reason,
+                            adminPortalUrl + "/drives/" + posting.id() + "/results",
+                            recipients));
+            log.info("Queued withdrawal-request notice for postingId={} studentUserId={} to {} staff member(s)",
+                    postingId, studentUserId, recipients.size());
+        } catch (Exception e) {
+            log.error("Could not queue the withdrawal-request notice for postingId={}: {}", postingId, e.getMessage(), e);
+        }
+    }
+
     /** Placement staff for the colleges a posting targets, addressable ones only. */
     private List<NotificationDispatchEvent.Recipient> staffRecipients(Long postingId) {
         List<Long> collegeIds = targetRepository.findByPosting_IdAndIsDeletedFalse(postingId).stream()

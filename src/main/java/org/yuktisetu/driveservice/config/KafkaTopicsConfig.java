@@ -7,7 +7,6 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.config.TopicBuilder;
 import org.springframework.kafka.listener.CommonErrorHandler;
 import org.springframework.kafka.listener.DefaultErrorHandler;
-import org.springframework.util.backoff.FixedBackOff;
 import org.yuktisetu.messaging.events.DriveTopics;
 
 /**
@@ -70,15 +69,24 @@ public class KafkaTopicsConfig {
     }
 
     /**
-     * Retry a failed message four times, two seconds apart, then move on.
+     * Retry a failed message with backoff -- 1 s doubling to 30 s, for about two
+     * minutes -- then move on (2026-11-01; was four tries two seconds apart).
      *
-     * Bounded on purpose: an unbounded retry would hold the partition behind one
-     * bad message, which is a stall by another name. Moving on loses nothing,
-     * because the reconciler settles any capture whose job has finished, straight
-     * from the job table.
+     * Moving on loses nothing here, unlike notification-service: both messages
+     * this service consumes are re-derived from the database by
+     * ScoringGateReconciler every five minutes and at startup -- captures settle
+     * from the job table, and a READY gate with no score run is scored. So a
+     * longer outage costs a delay, never a drive.
      */
     @Bean
     public CommonErrorHandler kafkaErrorHandler() {
-        return new DefaultErrorHandler(new FixedBackOff(2000L, 4L));
+        org.springframework.util.backoff.ExponentialBackOff backOff =
+                new org.springframework.util.backoff.ExponentialBackOff(1000L, 2.0);
+        backOff.setMaxInterval(30_000L);
+        backOff.setMaxElapsedTime(120_000L);
+        return new DefaultErrorHandler((record, failure) -> org.slf4j.LoggerFactory.getLogger(KafkaTopicsConfig.class)
+                .error("Giving up on {}-{}@{} after retries; the scoring-gate reconciler will settle it from the "
+                        + "database: {}", record.topic(), record.partition(), record.offset(), failure.getMessage()),
+                backOff);
     }
 }

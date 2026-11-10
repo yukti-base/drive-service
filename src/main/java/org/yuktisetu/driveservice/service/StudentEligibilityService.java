@@ -101,7 +101,8 @@ public class StudentEligibilityService {
                             List.of(studentUserId), ReapplicationRules.liveStatuses()),
                     decisionRepository
                             .findByPosting_IdAndStudent_IdAndIsDeletedFalse(posting.getId(), studentUserId)
-                            .orElse(null)));
+                            .orElse(null),
+                    !offerRepository.findStudentsWhoseLastOfferWasDeclined(List.of(studentUserId)).isEmpty()));
 
             if (failures.isEmpty() && outcome.needsReview()) {
                 failures.add("NEEDS_REVIEW");
